@@ -1,0 +1,55 @@
+name: Refresh PR data
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 05:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fetch merged PRs
+        env:
+          # A PAT only matters for private source repos; the default token can
+          # read public ones.
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          PR_GRAPH_REPO: ${{ vars.PR_GRAPH_REPO || 'webiny/webiny-js' }}
+          PR_GRAPH_DAYS: ${{ vars.PR_GRAPH_DAYS || '90' }}
+        run: ./fetch.sh
+
+      - name: Group into work streams
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::warning::No ANTHROPIC_API_KEY secret set - keeping the committed summary.js"
+            exit 0
+          fi
+          npm i -g @anthropic-ai/claude-code
+          ./summarize.sh
+
+      - name: Commit if anything changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.js summary.js
+          if git diff --staged --quiet; then
+            echo "Nothing changed."
+          else
+            git commit -m "chore: refresh PR data"
+            git push
+          fi

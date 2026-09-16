@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PR merge lanes</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:           #f9f9f7;
+    --surface-1:      #fcfcfb;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --axis:           #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --wash:           rgba(11,11,11,0.04);
+    --c-feat:         #2a78d6;
+    --c-fix:          #eb6834;
+    --c-internal:     #1baf7a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface-1: #1a1a19;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #898781;
+      --grid: #2c2c2a; --axis: #383835;
+      --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.05);
+      --c-feat: #3987e5; --c-fix: #d95926; --c-internal: #199e70;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface-1: #1a1a19;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #898781;
+    --grid: #2c2c2a; --axis: #383835;
+    --border: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.05);
+    --c-feat: #3987e5; --c-fix: #d95926; --c-internal: #199e70;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px 14px 40px;
+  }
+  .wrap { width: 100%; }
+
+  header h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header p  { margin: 0; color: var(--text-secondary); font-size: 13px; }
+  header code { font: inherit; color: var(--text-primary); }
+
+  .tiles { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 14px; }
+  .tile { flex: 1 1 148px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; }
+  .tile .v { font-size: 25px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; }
+  .tile .k { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-1); }
+  .seg button {
+    appearance: none; border: 0; background: transparent; color: var(--text-secondary);
+    font: inherit; font-size: 13px; padding: 5px 11px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--wash); color: var(--text-primary); font-weight: 600; }
+  .controls label { font-size: 13px; color: var(--text-secondary); display: inline-flex; gap: 6px; align-items: center; }
+  select {
+    font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  .ctl-label { font-size: 12px; color: var(--text-muted); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+  .legend button {
+    appearance: none; background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 10px 4px 8px; font: inherit; font-size: 12.5px;
+    color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .legend button[data-off="true"] { opacity: 0.4; }
+  .legend .sw { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .legend .chip {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 10px 4px 8px; font-size: 12.5px; color: var(--text-secondary);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+
+  .split { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+  .split > * { min-width: 0; }
+  @media (min-width: 1180px) { .split { grid-template-columns: minmax(0, 1fr) 340px; } }
+  @media (min-width: 1400px) { .split { grid-template-columns: minmax(0, 1fr) 510px; } }
+
+  /* --- the canvas ------------------------------------------------------- */
+  .stage {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .panes { display: flex; height: 68vh; min-height: 380px; }
+  .lanepane {
+    flex: 0 0 150px; position: relative; overflow: hidden;
+    border-right: 1px solid var(--border); background: var(--surface-1);
+  }
+  .lanepane .inner { position: absolute; inset: 0; will-change: transform; }
+  /* min-width:0 stops the wide canvas from forcing the flex item open and
+     pushing the whole page sideways. */
+  .scroller { flex: 1; min-width: 0; overflow: auto; position: relative; cursor: grab; overscroll-behavior: contain; }
+  .scroller.drag { cursor: grabbing; }
+  .timehead {
+    position: sticky; top: 0; z-index: 2; height: 26px;
+    background: var(--surface-1); border-bottom: 1px solid var(--border);
+  }
+  .plot { position: relative; }
+  svg { display: block; }
+  svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .lane-label { fill: var(--text-secondary); font-weight: 500; }
+  .lane-count { fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .axis-label { fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .pr-label { fill: var(--text-secondary); }
+  .dot, .hit { cursor: pointer; }
+  .hit { fill: transparent; }
+  .port { fill: none; stroke: var(--text-muted); stroke-width: 1.25; stroke-dasharray: 3 3; opacity: 0.85; }
+  .bar { cursor: pointer; }
+  .bar-label { fill: var(--text-primary); font-weight: 500; pointer-events: none; }
+  .bar-label.out { fill: var(--text-secondary); font-weight: 400; }
+
+  .minimap { border-top: 1px solid var(--border); background: var(--surface-1); cursor: pointer; position: relative; }
+  .minimap svg { width: 100%; }
+  .vp { fill: var(--wash); stroke: var(--axis); stroke-width: 1; }
+
+  .note { font-size: 12px; color: var(--text-muted); margin: 9px 2px 0; }
+  .hint { font-size: 12px; color: var(--text-muted); margin: 9px 2px 0; }
+  kbd {
+    font: inherit; font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 4px; padding: 0 4px; color: var(--text-secondary); background: var(--wash);
+  }
+
+  .streams { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 6px; }
+  .streams h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-muted); margin: 8px 10px 6px; font-weight: 600;
+  }
+  .stream {
+    display: block; width: 100%; text-align: left; background: transparent; border: 0;
+    border-radius: 8px; padding: 8px 10px; font: inherit; color: inherit; cursor: pointer;
+  }
+  .stream:hover, .stream[aria-pressed="true"] { background: var(--wash); }
+  .st-head { display: flex; align-items: baseline; gap: 7px; }
+  .st-title { font-weight: 600; font-size: 13px; flex: 1; }
+  .st-n { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .st-kind {
+    font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; align-self: center;
+  }
+  .st-sum {
+    font-size: 12.5px; color: var(--text-secondary); margin-top: 3px; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  }
+  .stream[aria-pressed="true"] .st-sum { -webkit-line-clamp: 99; }
+  .streams .empty { font-size: 12.5px; color: var(--text-muted); padding: 2px 10px 10px; line-height: 1.6; }
+  .streams code { background: var(--wash); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+  #tip {
+    position: fixed; z-index: 10; pointer-events: none; max-width: 340px;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.18); padding: 9px 11px; font-size: 12.5px; line-height: 1.45;
+  }
+  #tip .h { font-weight: 600; margin-bottom: 2px; }
+  #tip .m { color: var(--text-secondary); font-size: 11.5px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--text-secondary); font-weight: 600; position: sticky; top: 0; background: var(--surface-1); }
+  td.num, td.date { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-secondary); }
+  td a { color: inherit; }
+  .tabwrap {
+    max-height: 520px; overflow: auto; margin-top: 12px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>PR merge lanes</h1>
+    <p id="sub">Loading&hellip;</p>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="controls">
+    <span class="ctl-label">View</span>
+    <div class="seg" id="view">
+      <button data-v="prs" aria-pressed="true">PRs</button>
+      <button data-v="streams">Streams</button>
+    </div>
+    <span class="ctl-label">Window</span>
+    <div class="seg" id="range">
+      <button data-days="14">14d</button>
+      <button data-days="30">30d</button>
+      <button data-days="90" aria-pressed="true">90d</button>
+    </div>
+    <span class="ctl-label">Zoom</span>
+    <div class="seg" id="zoom">
+      <button data-z="out">&minus;</button>
+      <button data-z="fit">Fit</button>
+      <button data-z="in">+</button>
+    </div>
+    <label>Author <select id="author"><option value="">everyone</option></select></label>
+    <div class="seg">
+      <button id="ports" aria-pressed="true">Port links</button>
+      <button id="tableBtn" aria-pressed="false">Table</button>
+    </div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="split">
+    <div>
+      <div class="stage">
+        <div class="panes">
+          <div class="lanepane"><div class="inner" id="lanepane"></div></div>
+          <div class="scroller" id="scroller">
+            <div class="timehead" id="timehead"></div>
+            <div class="plot" id="plot"></div>
+          </div>
+        </div>
+        <div class="minimap" id="minimap"></div>
+      </div>
+      <p class="hint">
+        Drag to pan &middot; <kbd>&#8679;</kbd>+scroll or drag the strip below to move through time &middot;
+        <kbd>&#8984;</kbd>+scroll or <kbd>+</kbd>&thinsp;<kbd>&minus;</kbd> to zoom &middot;
+        zoom past a week per screen and the titles appear
+      </p>
+      <p class="note" id="note"></p>
+    </div>
+    <aside class="streams" id="streams"></aside>
+  </div>
+
+  <div class="tabwrap" id="tablewrap" hidden></div>
+</div>
+
+<div id="tip" hidden></div>
+
+<script src="data.js"></script>
+<script src="summary.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var DATA = window.PR_DATA || { repo: "(no data.js)", prs: [], fetchedAt: "" };
+  var SUMMARY = window.PR_SUMMARY || null;
+
+  var BUCKETS = [
+    { key: "feat", label: "Feature", color: "var(--c-feat)" },
+    { key: "fix", label: "Fix", color: "var(--c-fix)" },
+    { key: "internal", label: "Internal", color: "var(--c-internal)" }
+  ];
+  var COLOR = { feat: "var(--c-feat)", fix: "var(--c-fix)", internal: "var(--c-internal)" };
+
+  var DAY = 86400000;
+  var GUTTER_R = 52;        // room for the per-lane count
+  var LANE_GAP = 9, PAD_T = 8, PAD_B = 12;
+  var LABEL_ZOOM = 26;      // px per day below which titles are hidden entirely
+  var MIN_CHARS = 10;       // a label shorter than this is noise, not information
+  var MAX_ZOOM = 900;
+
+  var state = {
+    days: 90, author: "", ports: true, table: false, off: {}, stream: null,
+    view: "prs",            // "prs" draws one dot per PR, "streams" one bar per effort
+    px: null                // px per day; null means "fit the window"
+  };
+
+  var BAR_H = 20, BAR_GAP = 5;
+  var KIND_COLOR = { user: "var(--c-feat)", internal: "var(--c-internal)" };
+
+  // ---- parse -------------------------------------------------------------
+
+  function classify(title) {
+    var m = /^([a-zA-Z]+)(?:\(([^)]*)\))?!?:/.exec(title || "");
+    var type = m ? m[1].toLowerCase() : "other";
+    var scope = m && m[2] ? m[2] : "";
+    var bucket = "internal";
+    if (type === "feat") bucket = "feat";
+    else if (type === "fix" || type === "perf") bucket = "fix";
+    return { type: type, scope: scope, bucket: bucket };
+  }
+
+  function laneRank(base) {
+    if (base === "next") return [9999, 0, 0];
+    var m = /^release\/(\d+)\.(\d+)\.(\d+)/.exec(base);
+    return m ? [+m[1], +m[2], +m[3]] : null;
+  }
+
+  var ALL = DATA.prs.map(function (p) {
+    var c = classify(p.title);
+    return {
+      number: p.number, title: p.title, url: p.url, base: p.baseRefName,
+      author: (p.author && p.author.login) || "unknown",
+      merged: new Date(p.mergedAt), day: p.mergedAt.slice(0, 10),
+      add: p.additions, del: p.deletions, files: p.changedFiles,
+      type: c.type, scope: c.scope, bucket: c.bucket,
+      short: p.title.replace(/^[a-zA-Z]+(\([^)]*\))?!?:\s*/, ""),
+      rank: laneRank(p.baseRefName)
+    };
+  });
+  var LANED = ALL.filter(function (p) { return p.rank; });
+  var OFFLANE = ALL.length - LANED.length;
+
+  function dayMs(s) { return Date.parse(s + "T00:00:00Z"); }
+  function todayMs() { var n = new Date(); return Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()); }
+  function fmtDay(d) {
+    return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  }
+  function esc(t) {
+    return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // The canvas always spans every day we fetched, so you can keep scrolling
+  // back past the summary window.
+  var END_MS = todayMs();
+  var START_MS = Math.min.apply(null, LANED.map(function (p) { return dayMs(p.day); }));
+  var SPAN = Math.round((END_MS - START_MS) / DAY) + 1;
+
+  var GENERIC = /^(chore|build|ci):\s*(update dependencies|merge |bump )/i;
+  function portPairs(rows) {
+    var byTitle = {}, pairs = [];
+    rows.forEach(function (p) {
+      if (GENERIC.test(p.title)) return;
+      (byTitle[p.title] = byTitle[p.title] || []).push(p);
+    });
+    Object.keys(byTitle).forEach(function (t) {
+      var g = byTitle[t];
+      for (var i = 0; i < g.length; i++)
+        for (var j = i + 1; j < g.length; j++)
+          if (g[i].base !== g[j].base) pairs.push([g[i], g[j]]);
+    });
+    return pairs;
+  }
+
+  var scroller = document.getElementById("scroller");
+  var lanepane = document.getElementById("lanepane");
+  var tip = document.getElementById("tip");
+  var LAYOUT = null;    // last computed geometry, for the minimap and hit tests
+
+  function viewW() { return scroller.clientWidth - GUTTER_R; }
+  function fitPx() { return Math.max(1, viewW() / state.days); }
+  function px() { return state.px || fitPx(); }
+
+  // ---- render ------------------------------------------------------------
+
+  function render(keepScroll) {
+    var p = px();
+    var labelsOn = p >= LABEL_ZOOM;
+
+    var rows = LANED.filter(function (q) {
+      if (state.author && q.author !== state.author) return false;
+      if (state.off[q.bucket]) return false;
+      return true;
+    });
+
+    var streams = (SUMMARY && SUMMARY[String(state.days)]) ? SUMMARY[String(state.days)].streams : null;
+    var picked = (streams && state.stream != null) ? streams[state.stream] : null;
+    var inStream = null;
+    if (picked) { inStream = {}; picked.prs.forEach(function (n) { inStream[n] = 1; }); }
+
+    var streamView = state.view === "streams" && !!streams;
+    if (streamView) {
+      var winStart = END_MS - (state.days - 1) * DAY;
+      rows = rows.filter(function (q) { return dayMs(q.day) >= winStart; });
+    }
+
+    var laneMap = {};
+    rows.forEach(function (q) { (laneMap[q.base] = laneMap[q.base] || []).push(q); });
+    var lanes = Object.keys(laneMap).sort(function (a, b) {
+      var ra = laneRank(a), rb = laneRank(b);
+      return (rb[0] - ra[0]) || (rb[1] - ra[1]) || (rb[2] - ra[2]);
+    });
+
+    var canvasW = SPAN * p + GUTTER_R;
+    var r = Math.max(3, Math.min(7, p / 9 + 2.6));
+    var pitch = 2 * r + 3;
+    var rowH = labelsOn ? Math.max(pitch, 17) : pitch;
+
+    function x(dayStr) { return (Math.round((dayMs(dayStr) - START_MS) / DAY) + 0.5) * p; }
+    function dayIdx(dayStr) { return Math.round((dayMs(dayStr) - START_MS) / DAY); }
+
+    if (streamView) return renderStreamBars(p, rows, streams, lanes, laneMap, canvasW, dayIdx, keepScroll);
+
+    var y = PAD_T, laneY = {}, pos = {};
+    lanes.forEach(function (b) {
+      var byDay = {};
+      laneMap[b].slice().sort(function (m, n) { return m.merged - n.merged; }).forEach(function (q) {
+        byDay[q.day] = byDay[q.day] || [];
+        pos[q.number] = {
+          x: x(q.day), i: byDay[q.day].length, lane: b,
+          d: Math.round((dayMs(q.day) - START_MS) / DAY)
+        };
+        byDay[q.day].push(q);
+      });
+      var maxStack = Math.max.apply(null, Object.keys(byDay).map(function (k) { return byDay[k].length; }));
+      var h = Math.max(20, maxStack * rowH + 6);
+      laneY[b] = { top: y, h: h, base: y + h };
+      y += h + LANE_GAP;
+    });
+    var H = y + PAD_B;
+    Object.keys(pos).forEach(function (n) {
+      var q = pos[n];
+      q.y = laneY[q.lane].base - 4 - q.i * rowH - r;
+    });
+
+    // A label may run past its own day column into empty space, so find where
+    // the next mark on the same lane and stack row actually sits.
+    var occ = {};
+    Object.keys(pos).forEach(function (n) {
+      var q = pos[n], k = q.lane + "|" + q.i;
+      (occ[k] = occ[k] || []).push(q.d);
+    });
+    Object.keys(occ).forEach(function (k) { occ[k].sort(function (a, b) { return a - b; }); });
+    Object.keys(pos).forEach(function (n) {
+      var q = pos[n], arr = occ[q.lane + "|" + q.i], next = null;
+      for (var i2 = 0; i2 < arr.length; i2++) { if (arr[i2] > q.d) { next = arr[i2]; break; } }
+      var room = (next == null) ? 520 : (next - q.d) * p - 10;
+      q.chars = Math.floor((room - r - 8) / 6.1);
+    });
+
+    paintAxis(p, canvasW);
+
+    // plot
+    var s = ['<svg id="chart" xmlns="http://www.w3.org/2000/svg" width="' + canvasW + '" height="' + H + '">'];
+    for (var j = 0; j < SPAN; j++) {
+      var d2 = new Date(START_MS + j * DAY);
+      if (d2.getUTCDay() !== 1) continue;
+      var gx2 = (j * p).toFixed(1);
+      s.push('<line x1="' + gx2 + '" y1="0" x2="' + gx2 + '" y2="' + (H - PAD_B) + '" stroke="var(--grid)" stroke-width="1"/>');
+    }
+    lanes.forEach(function (b) {
+      var L = laneY[b];
+      s.push('<line x1="0" y1="' + L.base + '" x2="' + (canvasW - GUTTER_R) + '" y2="' + L.base + '" stroke="var(--axis)" stroke-width="1"/>');
+    });
+
+    var pairs = state.ports ? portPairs(rows) : [];
+    pairs.forEach(function (pr) {
+      var a = pos[pr[0].number], b = pos[pr[1].number];
+      if (!a || !b) return;
+      var mx = (a.x + b.x) / 2;
+      s.push('<path class="port"' + (inStream ? ' opacity="0.12"' : "") + ' d="M' + a.x.toFixed(1) + " " + a.y.toFixed(1) +
+             " C" + mx.toFixed(1) + " " + a.y.toFixed(1) + " " + mx.toFixed(1) + " " + b.y.toFixed(1) +
+             " " + b.x.toFixed(1) + " " + b.y.toFixed(1) + '"/>');
+    });
+
+    var anyLabel = false;
+    rows.forEach(function (q) {
+      var g = pos[q.number];
+      var dim = inStream && !inStream[q.number];
+      var op = dim ? ' opacity="0.12"' : "";
+      s.push('<circle class="dot" cx="' + g.x.toFixed(1) + '" cy="' + g.y.toFixed(1) + '" r="' + r.toFixed(1) +
+             '" fill="' + COLOR[q.bucket] + '" stroke="var(--surface-1)" stroke-width="1.25"' + op +
+             ' data-n="' + q.number + '"/>');
+      if (labelsOn && g.chars >= MIN_CHARS) {
+        anyLabel = true;
+        var txt = (q.scope ? q.scope + ": " : "") + q.short;
+        if (txt.length > g.chars) txt = txt.slice(0, g.chars - 1) + "…";
+        s.push('<text class="pr-label" x="' + (g.x + r + 6).toFixed(1) + '" y="' + (g.y + 3.6).toFixed(1) + '"' + op +
+               ' data-n="' + q.number + '">' + esc(txt) + "</text>");
+      }
+      s.push('<circle class="hit" cx="' + g.x.toFixed(1) + '" cy="' + g.y.toFixed(1) + '" r="' + Math.max(8, r + 3) +
+             '" data-n="' + q.number + '"/>');
+    });
+    s.push("</svg>");
+    document.getElementById("plot").innerHTML = s.join("");
+
+    paintLanePane(lanes, laneY, laneMap, H);
+    fitStage(H);
+
+    LAYOUT = { p: p, canvasW: canvasW, H: H, lanes: lanes, laneY: laneY, pos: pos, rows: rows };
+
+    wire(rows);
+    paintMinimap(rows, lanes, laneY, H);
+    paintTiles(rows, lanes, pairs.length);
+    paintStreams(streams, rows);
+    paintLegend();
+    paintTable(inStream ? rows.filter(function (q) { return inStream[q.number]; }) : rows);
+
+    var bits = [];
+    if (picked) bits.push('showing "' + picked.title + '" (' + picked.prs.length + " PRs) · click it again to clear");
+    bits.push(Math.round(viewW() / p) + " days per screen");
+    if (!anyLabel) bits.push("zoom in for titles");
+    if (OFFLANE) bits.push(OFFLANE + " PRs merged into another PR's branch are not shown");
+    document.getElementById("note").textContent = bits.join(" · ");
+
+    if (!keepScroll) scroller.scrollLeft = canvasW;
+    syncPanes();
+  }
+
+  // One bar per work stream per lane: from its first merge on that line to its
+  // last, with a tick for every PR in between. Six PRs that are one effort read
+  // as one bar rather than six anonymous dots.
+  function renderStreamBars(p, rows, streams, lanes, laneMap, canvasW, dayIdx, keepScroll) {
+    var streamOf = {};
+    streams.forEach(function (st, i) { st.prs.forEach(function (n) { streamOf[n] = i; }); });
+
+    var y = PAD_T, laneY = {}, bars = [];
+    lanes.forEach(function (lane) {
+      var groups = {};
+      laneMap[lane].forEach(function (q) {
+        var si = streamOf[q.number];
+        if (si == null) return;
+        var g = groups[si] || (groups[si] = { si: si, days: [], n: 0 });
+        g.days.push(dayIdx(q.day));
+        g.n++;
+      });
+
+      var list = Object.keys(groups).map(function (k) {
+        var g = groups[k];
+        g.d0 = Math.min.apply(null, g.days);
+        g.d1 = Math.max.apply(null, g.days);
+        g.x0 = g.d0 * p;
+        g.x1 = Math.max((g.d1 + 1) * p, g.x0 + 14);
+        g.text = streams[g.si].title + "  " + g.n;
+        g.labelW = g.text.length * 6.15 + 14;
+        g.inside = (g.x1 - g.x0) >= g.labelW + 14;
+        g.right = g.inside ? g.x1 : (g.x1 + 8 + g.labelW);
+        return g;
+      }).sort(function (a, b) { return a.x0 - b.x0; });
+
+      var rowEnds = [];
+      list.forEach(function (g) {
+        var slot = 0;
+        while (slot < rowEnds.length && g.x0 < rowEnds[slot] + 10) slot++;
+        rowEnds[slot] = g.right;
+        g.slot = slot;
+      });
+
+      var nRows = Math.max(1, rowEnds.length);
+      var h = nRows * (BAR_H + BAR_GAP) + 6;
+      laneY[lane] = { top: y, h: h, base: y + h };
+      y += h + LANE_GAP;
+      list.forEach(function (g) {
+        g.lane = lane;
+        g.y = laneY[lane].base - 4 - g.slot * (BAR_H + BAR_GAP) - BAR_H;
+        bars.push(g);
+      });
+    });
+    var H = y + PAD_B;
+
+    paintAxis(p, canvasW);
+
+    var picked = state.stream != null ? streams[state.stream] : null;
+    var s = ['<svg id="chart" xmlns="http://www.w3.org/2000/svg" width="' + canvasW + '" height="' + H + '">'];
+    for (var j = 0; j < SPAN; j++) {
+      var d2 = new Date(START_MS + j * DAY);
+      if (d2.getUTCDay() !== 1) continue;
+      var gx2 = (j * p).toFixed(1);
+      s.push('<line x1="' + gx2 + '" y1="0" x2="' + gx2 + '" y2="' + (H - PAD_B) + '" stroke="var(--grid)" stroke-width="1"/>');
+    }
+    lanes.forEach(function (b) {
+      s.push('<line x1="0" y1="' + laneY[b].base + '" x2="' + (canvasW - GUTTER_R) + '" y2="' + laneY[b].base +
+             '" stroke="var(--axis)" stroke-width="1"/>');
+    });
+
+    bars.forEach(function (g) {
+      var st = streams[g.si];
+      var c = KIND_COLOR[st.kind] || KIND_COLOR.internal;
+      var op = (picked && state.stream !== g.si) ? ' opacity="0.14"' : "";
+      var w = g.x1 - g.x0;
+      s.push('<g class="bar"' + op + ' data-s="' + g.si + '" data-n="' + g.n + '" data-lane="' + esc(g.lane) + '">');
+      s.push('<rect x="' + g.x0.toFixed(1) + '" y="' + g.y + '" width="' + w.toFixed(1) + '" height="' + BAR_H +
+             '" rx="4" fill="' + c + '" fill-opacity="0.16" stroke="' + c + '" stroke-opacity="0.6" stroke-width="1"/>');
+      g.days.forEach(function (d) {
+        var tx = Math.min(d * p + 1, g.x1 - 3);
+        s.push('<rect x="' + tx.toFixed(1) + '" y="' + (g.y + 3) + '" width="2" height="' + (BAR_H - 6) +
+               '" rx="1" fill="' + c + '" fill-opacity="0.85"/>');
+      });
+      var ty = g.y + BAR_H / 2 + 3.8;
+      if (g.inside) {
+        s.push('<text class="bar-label" x="' + (g.x0 + 8).toFixed(1) + '" y="' + ty.toFixed(1) + '">' + esc(g.text) + "</text>");
+      } else {
+        s.push('<text class="bar-label out" x="' + (g.x1 + 8).toFixed(1) + '" y="' + ty.toFixed(1) + '">' + esc(g.text) + "</text>");
+      }
+      s.push("</g>");
+    });
+    s.push("</svg>");
+    document.getElementById("plot").innerHTML = s.join("");
+
+    paintLanePane(lanes, laneY, laneMap, H);
+    fitStage(H);
+    LAYOUT = { p: p, canvasW: canvasW, H: H, lanes: lanes, laneY: laneY, pos: {}, rows: rows };
+
+    var plot = document.getElementById("plot");
+    plot.onmousemove = function (ev) {
+      var g = ev.target.closest && ev.target.closest(".bar");
+      if (dragging || !g) { tip.hidden = true; return; }
+      var st = streams[+g.getAttribute("data-s")];
+      tip.innerHTML = '<div class="h">' + esc(st.title) + "</div><div>" + esc(st.summary) + "</div>" +
+        '<div class="m">' + g.getAttribute("data-n") + " of " + st.prs.length + " PRs on " +
+        esc(g.getAttribute("data-lane")) + " · " + esc(st.kind === "user" ? "user-facing" : "internal") + "</div>";
+      tip.hidden = false;
+      var pad = 14, tw = tip.offsetWidth, th = tip.offsetHeight;
+      var left = ev.clientX + pad, top = ev.clientY + pad;
+      if (left + tw > innerWidth - 8) left = ev.clientX - tw - pad;
+      if (top + th > innerHeight - 8) top = ev.clientY - th - pad;
+      tip.style.left = Math.max(8, left) + "px";
+      tip.style.top = Math.max(8, top) + "px";
+    };
+    plot.onmouseleave = function () { tip.hidden = true; };
+    plot.onclick = function (ev) {
+      if (moved) return;
+      var g = ev.target.closest && ev.target.closest(".bar");
+      if (!g) return;
+      var i = +g.getAttribute("data-s");
+      state.stream = (state.stream === i) ? null : i;
+      render(true);
+    };
+
+    paintMinimap(rows, lanes, laneY, H);
+    paintTiles(rows, lanes, portPairs(rows).length);
+    paintStreams(streams, rows);
+    paintLegend();
+    var inS = null;
+    if (picked) { inS = {}; picked.prs.forEach(function (n) { inS[n] = 1; }); }
+    paintTable(inS ? rows.filter(function (q) { return inS[q.number]; }) : rows);
+
+    var bits = ["one bar per work stream, ticks are the individual PRs",
+                "limited to the " + state.days + " day window the summary covers"];
+    if (picked) bits.push('showing "' + picked.title + '" · click it again to clear');
+    if (OFFLANE) bits.push(OFFLANE + " PRs merged into another PR's branch are not shown");
+    document.getElementById("note").textContent = bits.join(" · ");
+
+    if (!keepScroll) scroller.scrollLeft = canvasW;
+    syncPanes();
+  }
+
+  function paintAxis(p, canvasW) {
+    var ax = ['<svg xmlns="http://www.w3.org/2000/svg" width="' + canvasW + '" height="26">'];
+    var step = p >= 90 ? 1 : (p >= 9 ? 7 : 14);
+    var seenMonth = "";
+    for (var i = 0; i < SPAN; i++) {
+      var dt = new Date(START_MS + i * DAY);
+      var isTick = step === 1 ? true : dt.getUTCDay() === 1;
+      if (step === 14) isTick = isTick && Math.floor(i / 7) % 2 === 0;
+      if (!isTick) continue;
+      var mon = dt.toLocaleDateString(undefined, { month: "short", timeZone: "UTC" });
+      var lab = (mon !== seenMonth) ? mon + " " + dt.getUTCDate() : String(dt.getUTCDate());
+      seenMonth = mon;
+      ax.push('<text class="axis-label" x="' + (i * p + 4).toFixed(1) + '" y="17">' + lab + "</text>");
+    }
+    ax.push("</svg>");
+    document.getElementById("timehead").innerHTML = ax.join("");
+  }
+
+  function paintLanePane(lanes, laneY, laneMap, H) {
+    var lp = ['<svg xmlns="http://www.w3.org/2000/svg" width="150" height="' + (H + 26) + '">'];
+    lanes.forEach(function (b) {
+      var L = laneY[b];
+      lp.push('<text class="lane-label" x="140" y="' + (L.base + 23) + '" text-anchor="end">' + esc(b) + "</text>");
+      lp.push('<text class="lane-count" x="140" y="' + (L.base + 37) + '" text-anchor="end">' + laneMap[b].length + "</text>");
+    });
+    lp.push("</svg>");
+    lanepane.innerHTML = lp.join("");
+  }
+
+  // Shrink the stage to the lanes when they don't fill it, rather than leaving
+  // a slab of empty canvas under the last release line.
+  function fitStage(H) {
+    document.querySelector(".panes").style.height =
+      Math.max(240, Math.min(Math.round(innerHeight * 0.68), H + 28)) + "px";
+  }
+
+  // The legend names whatever the marks are currently coloured by.
+  function paintLegend() {
+    var el = document.getElementById("legend");
+    if (state.view === "streams") {
+      el.innerHTML = [["user", "User-facing"], ["internal", "Internal"]].map(function (k) {
+        return '<span class="chip"><span class="sw" style="background:' + KIND_COLOR[k[0]] + '"></span>' + k[1] + "</span>";
+      }).join("");
+    } else {
+      el.innerHTML = BUCKETS.map(function (b) {
+        return '<button data-bucket="' + b.key + '" data-off="' + (state.off[b.key] ? "true" : "false") +
+          '"><span class="sw" style="background:' + b.color + '"></span>' + b.label + "</button>";
+      }).join("");
+    }
+  }
+
+  function syncPanes() {
+    lanepane.style.transform = "translateY(" + (-scroller.scrollTop) + "px)";
+    paintViewport();
+  }
+
+  // ---- minimap -----------------------------------------------------------
+
+  var MM_H = 46;
+  function paintMinimap(rows, lanes, laneY, H) {
+    var w = document.getElementById("minimap").clientWidth || 800;
+    var sx = w / SPAN;
+    var laneIdx = {};
+    lanes.forEach(function (b, i) { laneIdx[b] = i; });
+    var lh = (MM_H - 10) / Math.max(1, lanes.length);
+    var s = ['<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + MM_H + '" viewBox="0 0 ' + w + " " + MM_H + '">'];
+    rows.forEach(function (q) {
+      var i = Math.round((dayMs(q.day) - START_MS) / DAY);
+      var mx = i * sx;
+      var my = 5 + laneIdx[q.base] * lh;
+      s.push('<rect x="' + mx.toFixed(1) + '" y="' + my.toFixed(1) + '" width="1.6" height="' + Math.max(2, lh - 1.5).toFixed(1) +
+             '" fill="' + COLOR[q.bucket] + '" opacity="0.8"/>');
+    });
+    s.push('<rect class="vp" id="vp" x="0" y="0.5" width="10" height="' + (MM_H - 1) + '" rx="3"/>');
+    s.push("</svg>");
+    document.getElementById("minimap").innerHTML = s.join("");
+    paintViewport();
+  }
+
+  function paintViewport() {
+    var vp = document.getElementById("vp");
+    if (!vp || !LAYOUT) return;
+    var w = document.getElementById("minimap").clientWidth || 800;
+    var frac = scroller.scrollLeft / LAYOUT.canvasW;
+    var fracW = Math.min(1, scroller.clientWidth / LAYOUT.canvasW);
+    vp.setAttribute("x", (frac * w).toFixed(1));
+    vp.setAttribute("width", Math.max(6, fracW * w).toFixed(1));
+  }
+
+  function minimapJump(clientX) {
+    var el = document.getElementById("minimap");
+    var rect = el.getBoundingClientRect();
+    var frac = (clientX - rect.left) / rect.width;
+    scroller.scrollLeft = frac * LAYOUT.canvasW - scroller.clientWidth / 2;
+  }
+
+  // ---- panels ------------------------------------------------------------
+
+  function paintTiles(rows, lanes, nPorts) {
+    var startMs = END_MS - (state.days - 1) * DAY;
+    var win = rows.filter(function (q) { return dayMs(q.day) >= startMs; });
+    var onNext = win.filter(function (q) { return q.base === "next"; }).length;
+    var relLanes = {};
+    win.forEach(function (q) { if (q.base !== "next") relLanes[q.base] = 1; });
+    var tiles = [
+      [win.length, "PRs merged, last " + state.days + " days"],
+      [onNext, "into next"],
+      [win.length - onNext, "into release lines"],
+      [Object.keys(relLanes).length, "release lines touched"],
+      [nPorts, "ported across lines"]
+    ];
+    document.getElementById("tiles").innerHTML = tiles.map(function (t) {
+      return '<div class="tile"><div class="v">' + t[0] + '</div><div class="k">' + t[1] + "</div></div>";
+    }).join("");
+    document.getElementById("sub").innerHTML =
+      "<code>" + esc(DATA.repo) + "</code> &middot; " + fmtDay(START_MS) + " &ndash; " + fmtDay(END_MS) +
+      " on the canvas" +
+      (DATA.fetchedAt ? " &middot; data pulled " + esc(DATA.fetchedAt.replace("T", " ").replace("Z", " UTC")) : "");
+  }
+
+  function paintStreams(streams, rows) {
+    var el = document.getElementById("streams");
+    if (!streams) {
+      el.innerHTML = "<h2>What landed</h2>" +
+        '<p class="empty">No summary yet. Run <code>./summarize.sh</code> to group these PRs into work streams, then reload.</p>';
+      return;
+    }
+    var inView = {};
+    rows.forEach(function (q) { inView[q.number] = 1; });
+    el.innerHTML = "<h2>What landed &middot; last " + state.days + " days</h2>" +
+      streams.map(function (st, i) {
+        var n = st.prs.filter(function (z) { return inView[z]; }).length;
+        return '<button class="stream" data-i="' + i + '" aria-pressed="' + (state.stream === i) + '">' +
+          '<span class="st-head"><span class="st-title">' + esc(st.title) + "</span>" +
+          '<span class="st-kind">' + esc(st.kind) + "</span>" +
+          '<span class="st-n">' + n + "</span></span>" +
+          '<span class="st-sum">' + esc(st.summary) + "</span></button>";
+      }).join("");
+  }
+
+  function paintTable(rows) {
+    var w = document.getElementById("tablewrap");
+    w.hidden = !state.table;
+    if (!state.table) return;
+    var sorted = rows.slice().sort(function (a, b) { return b.merged - a.merged; });
+    w.innerHTML = "<table><thead><tr><th>Merged</th><th>PR</th><th>Type</th><th>Into</th><th>Author</th><th>Title</th></tr></thead><tbody>" +
+      sorted.map(function (q) {
+        return "<tr><td class='date'>" + fmtDay(q.merged) + "</td>" +
+          "<td class='num'><a href='" + q.url + "' target='_blank' rel='noreferrer'>#" + q.number + "</a></td>" +
+          "<td>" + esc(q.type) + "</td><td class='num'>" + esc(q.base) + "</td>" +
+          "<td>" + esc(q.author) + "</td><td>" + esc(q.title) + "</td></tr>";
+      }).join("") + "</tbody></table>";
+  }
+
+  function showTip(q, ev) {
+    tip.innerHTML =
+      '<div class="h">#' + q.number + " " + esc(q.type + (q.scope ? "(" + q.scope + ")" : "")) + "</div>" +
+      "<div>" + esc(q.short) + "</div>" +
+      '<div class="m">' + esc(q.author) + " &middot; " + fmtDay(q.merged) +
+      " &middot; +" + q.add + " &minus;" + q.del + " &middot; " + q.files + " file" + (q.files === 1 ? "" : "s") + "</div>" +
+      '<div class="m">merged into ' + esc(q.base) + "</div>";
+    tip.hidden = false;
+    var pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+    var left = ev.clientX + pad, top = ev.clientY + pad;
+    if (left + w > innerWidth - 8) left = ev.clientX - w - pad;
+    if (top + h > innerHeight - 8) top = ev.clientY - h - pad;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, top) + "px";
+  }
+
+  function wire(rows) {
+    var byNum = {};
+    rows.forEach(function (q) { byNum[q.number] = q; });
+    var plot = document.getElementById("plot");
+    plot.onmousemove = function (ev) {
+      if (dragging) { tip.hidden = true; return; }
+      var t = ev.target.getAttribute && ev.target.getAttribute("data-n");
+      if (t && byNum[t]) showTip(byNum[t], ev); else tip.hidden = true;
+    };
+    plot.onmouseleave = function () { tip.hidden = true; };
+    plot.onclick = function (ev) {
+      if (moved) return;
+      var t = ev.target.getAttribute && ev.target.getAttribute("data-n");
+      if (t && byNum[t]) window.open(byNum[t].url, "_blank", "noreferrer");
+    };
+  }
+
+  // ---- navigation --------------------------------------------------------
+
+  function zoomAt(factor, clientX) {
+    var rect = scroller.getBoundingClientRect();
+    var anchor = (clientX == null ? rect.width / 2 : clientX - rect.left);
+    var dayAt = (scroller.scrollLeft + anchor) / px();
+    var next = Math.max(fitPx() * 0.999, Math.min(MAX_ZOOM, px() * factor));
+    state.px = (next <= fitPx()) ? null : next;
+    render(true);
+    scroller.scrollLeft = dayAt * px() - anchor;
+    syncPanes();
+  }
+
+  scroller.addEventListener("wheel", function (ev) {
+    if (ev.metaKey || ev.ctrlKey) {
+      ev.preventDefault();
+      zoomAt(Math.exp(-ev.deltaY * 0.004), ev.clientX);
+    } else if (ev.shiftKey && Math.abs(ev.deltaY) > Math.abs(ev.deltaX)) {
+      ev.preventDefault();
+      scroller.scrollLeft += ev.deltaY;
+    }
+  }, { passive: false });
+
+  var dragging = false, moved = false, sx0 = 0, sy0 = 0, cx0 = 0, cy0 = 0;
+  scroller.addEventListener("mousedown", function (ev) {
+    if (ev.button !== 0) return;
+    dragging = true; moved = false;
+    sx0 = ev.clientX; sy0 = ev.clientY;
+    cx0 = scroller.scrollLeft; cy0 = scroller.scrollTop;
+    scroller.classList.add("drag");
+  });
+  addEventListener("mousemove", function (ev) {
+    if (!dragging) return;
+    var dx = ev.clientX - sx0, dy = ev.clientY - sy0;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+    scroller.scrollLeft = cx0 - dx;
+    scroller.scrollTop = cy0 - dy;
+  });
+  addEventListener("mouseup", function () {
+    if (!dragging) return;
+    dragging = false;
+    scroller.classList.remove("drag");
+    setTimeout(function () { moved = false; }, 0);
+  });
+
+  scroller.addEventListener("scroll", syncPanes);
+
+  var mm = document.getElementById("minimap"), mmDrag = false;
+  mm.addEventListener("mousedown", function (ev) { mmDrag = true; minimapJump(ev.clientX); });
+  addEventListener("mousemove", function (ev) { if (mmDrag) minimapJump(ev.clientX); });
+  addEventListener("mouseup", function () { mmDrag = false; });
+
+  addEventListener("keydown", function (ev) {
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    var step = scroller.clientWidth * 0.8;
+    if (ev.key === "ArrowLeft") { scroller.scrollLeft -= step; ev.preventDefault(); }
+    else if (ev.key === "ArrowRight") { scroller.scrollLeft += step; ev.preventDefault(); }
+    else if (ev.key === "ArrowUp") { scroller.scrollTop -= 60; ev.preventDefault(); }
+    else if (ev.key === "ArrowDown") { scroller.scrollTop += 60; ev.preventDefault(); }
+    else if (ev.key === "+" || ev.key === "=") { zoomAt(1.4, null); ev.preventDefault(); }
+    else if (ev.key === "-") { zoomAt(1 / 1.4, null); ev.preventDefault(); }
+    else if (ev.key === "0") { state.px = null; render(); }
+  });
+
+  // ---- controls ----------------------------------------------------------
+
+  document.getElementById("legend").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button"); if (!b) return;
+    var k = b.getAttribute("data-bucket");
+    state.off[k] = !state.off[k];
+    render(true);
+  });
+
+  document.getElementById("view").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button"); if (!b) return;
+    var v = b.getAttribute("data-v");
+    if (v === "streams" && !SUMMARY) {
+      document.getElementById("note").textContent =
+        "No summary yet — run ./summarize.sh to group these PRs into work streams.";
+      return;
+    }
+    state.view = v;
+    [].forEach.call(this.children, function (c) { c.setAttribute("aria-pressed", c === b ? "true" : "false"); });
+    render(true);
+  });
+
+  document.getElementById("range").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button"); if (!b) return;
+    state.days = +b.getAttribute("data-days");
+    state.stream = null;
+    state.px = null;
+    [].forEach.call(this.children, function (c) { c.setAttribute("aria-pressed", c === b ? "true" : "false"); });
+    render();
+  });
+
+  document.getElementById("zoom").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button"); if (!b) return;
+    var z = b.getAttribute("data-z");
+    if (z === "fit") { state.px = null; render(); }
+    else zoomAt(z === "in" ? 1.6 : 1 / 1.6, null);
+  });
+
+  var authors = {};
+  LANED.forEach(function (q) { authors[q.author] = (authors[q.author] || 0) + 1; });
+  var sel = document.getElementById("author");
+  Object.keys(authors).sort(function (a, b) { return authors[b] - authors[a]; }).forEach(function (a) {
+    var o = document.createElement("option");
+    o.value = a; o.textContent = a + " (" + authors[a] + ")";
+    sel.appendChild(o);
+  });
+  sel.addEventListener("change", function () { state.author = this.value; render(true); });
+
+  document.getElementById("ports").addEventListener("click", function () {
+    state.ports = !state.ports;
+    this.setAttribute("aria-pressed", state.ports ? "true" : "false");
+    render(true);
+  });
+  document.getElementById("tableBtn").addEventListener("click", function () {
+    state.table = !state.table;
+    this.setAttribute("aria-pressed", state.table ? "true" : "false");
+    render(true);
+  });
+
+  // Clicking a work stream flies the canvas to where that work happened.
+  document.getElementById("streams").addEventListener("click", function (ev) {
+    var b = ev.target.closest(".stream"); if (!b) return;
+    var i = +b.getAttribute("data-i");
+    var streams = (SUMMARY && SUMMARY[String(state.days)]) ? SUMMARY[String(state.days)].streams : null;
+    state.stream = (state.stream === i) ? null : i;
+    render(true);
+    if (state.stream != null && streams) {
+      var set = {}; streams[i].prs.forEach(function (n) { set[n] = 1; });
+      var xs = LANED.filter(function (q) { return set[q.number]; })
+                    .map(function (q) { return (dayMs(q.day) - START_MS) / DAY; });
+      if (xs.length) {
+        var lo = Math.min.apply(null, xs), hi = Math.max.apply(null, xs);
+        scroller.scrollTo({ left: (lo + hi) / 2 * px() - scroller.clientWidth / 2, behavior: "smooth" });
+      }
+    }
+  });
+
+  // Watch the container, not the window: the canvas also has to refit when the
+  // side panel wraps or the stage is resized without the window changing.
+  var t, lastW = 0;
+  function onResize() {
+    clearTimeout(t);
+    t = setTimeout(function () {
+      var w = scroller.clientWidth;
+      if (w === lastW) return;
+      lastW = w;
+      render(state.px != null);
+    }, 100);
+  }
+  if (window.ResizeObserver) new ResizeObserver(onResize).observe(scroller);
+  addEventListener("resize", onResize);
+  render();
+  lastW = scroller.clientWidth;
+})();
+</script>
+</body>
+</html>
