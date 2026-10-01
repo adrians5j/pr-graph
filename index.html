@@ -307,8 +307,8 @@
     <span class="ctl-label">Window</span>
     <div class="seg" id="range">
       <button data-days="14">14d</button>
-      <button data-days="30">30d</button>
-      <button data-days="90" aria-pressed="true">90d</button>
+      <button data-days="30" aria-pressed="true">30d</button>
+      <button data-days="90">90d</button>
     </div>
     <span class="ctl-label">Zoom</span>
     <div class="seg" id="zoom">
@@ -374,7 +374,7 @@
   var MAX_ZOOM = 900;
 
   var state = {
-    days: 90, author: "", ports: true, off: {}, stream: null,
+    days: 30, author: "", ports: true, off: {}, stream: null,
     view: SUMMARY ? "streams" : "prs",  // "prs" draws one dot per PR, "streams" one bar per effort
     px: null                // px per day; null means "fit the window"
   };
