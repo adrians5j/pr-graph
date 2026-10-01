@@ -191,7 +191,7 @@
   <div class="controls">
     <span class="ctl-label">View</span>
     <div class="seg" id="view">
-      <button data-v="prs" aria-pressed="true">PRs</button>
+      <button data-v="prs">PRs</button>
       <button data-v="streams">Streams</button>
     </div>
     <span class="ctl-label">Window</span>
@@ -266,7 +266,7 @@
 
   var state = {
     days: 90, author: "", ports: true, table: false, off: {}, stream: null,
-    view: "prs",            // "prs" draws one dot per PR, "streams" one bar per effort
+    view: SUMMARY ? "streams" : "prs",  // "prs" draws one dot per PR, "streams" one bar per effort
     px: null                // px per day; null means "fit the window"
   };
 
@@ -972,6 +972,9 @@
   }
   if (window.ResizeObserver) new ResizeObserver(onResize).observe(scroller);
   addEventListener("resize", onResize);
+  [].forEach.call(document.getElementById("view").children, function (c) {
+    c.setAttribute("aria-pressed", c.getAttribute("data-v") === state.view ? "true" : "false");
+  });
   render();
   lastW = scroller.clientWidth;
 })();
