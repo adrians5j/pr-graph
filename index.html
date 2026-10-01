@@ -279,6 +279,42 @@
   td a { color: var(--c-feat); text-decoration: none; }
   td a:hover { text-decoration: underline; }
   .tabwrap.shell { margin-top: 16px; }
+
+  /* --- scope map ------------------------------------------------------- */
+  .scopes.shell { margin-top: 16px; }
+  .scopes .core { padding: 6px 6px 8px; }
+  .sc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 8px 8px 12px; }
+  .sc-head h2 { font: 600 15px var(--sans); letter-spacing: -0.01em; margin: 0; display: flex; align-items: center; gap: 10px; }
+  .sc-head h2 small { font: 500 10px var(--sans); text-transform: uppercase; letter-spacing: 0.16em; color: var(--text-3); background: var(--chip); border-radius: 999px; padding: 3px 9px; box-shadow: 0 0 0 1px var(--hair); }
+  .sc-key { display: flex; gap: 12px; margin-left: auto; font-size: 12px; color: var(--text-2); }
+  .sc-key span { display: inline-flex; align-items: center; gap: 6px; }
+  .sc-key i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .sc-clear {
+    appearance: none; border: 0; cursor: pointer; font: 500 12px var(--sans); color: var(--text);
+    background: var(--chip-on); box-shadow: var(--chip-on-shadow); border-radius: 999px; padding: 5px 12px;
+  }
+  .scmap { position: relative; height: 460px; margin: 0 2px; }
+  @media (max-width: 767px) { .scmap { height: 560px; } }
+  .sc-group { position: absolute; pointer-events: none; }
+  .sc-group b {
+    position: absolute; left: 4px; top: 2px; font: 500 10px var(--sans); text-transform: uppercase;
+    letter-spacing: 0.14em; color: var(--text-3); white-space: nowrap; overflow: hidden; max-width: calc(100% - 8px);
+  }
+  .sc {
+    position: absolute; border-radius: 8px; overflow: hidden; cursor: pointer;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 34%, transparent);
+    background: color-mix(in srgb, var(--tone) 14%, var(--core));
+    transition: opacity 0.35s var(--spring), box-shadow 0.25s var(--spring);
+  }
+  .sc:hover { box-shadow: inset 0 0 0 1.5px var(--tone); }
+  .sc.on { box-shadow: inset 0 0 0 2px var(--tone); }
+  .scmap.picking .sc:not(.on) { opacity: 0.28; }
+  .sc .nm { position: absolute; left: 8px; top: 6px; right: 8px; font: 500 12px/1.25 var(--sans); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sc .ct { position: absolute; left: 8px; right: 8px; top: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 500 11px var(--mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .sc .mix { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; display: flex; gap: 2px; }
+  .sc .mix i { display: block; height: 100%; }
+  .sc.none { --tone: var(--text-3); background-image: repeating-linear-gradient(135deg, transparent 0 6px, var(--chip) 6px 8px); }
+  .sc-note { font-size: 12px; color: var(--text-3); margin: 10px 8px 2px; }
   .tabwrap .core { max-height: 1040px; overflow: auto; }
 
   @media (max-width: 767px) {
@@ -345,6 +381,24 @@
     <aside class="streams shell"><div class="core" id="streams"></div></aside>
   </div>
 
+  <section class="scopes shell rise d3"><div class="core">
+    <div class="sc-head">
+      <h2>Where the work went <small id="scWin"></small></h2>
+      <div class="seg" id="scBy">
+        <button data-by="prs" aria-pressed="true">PR count</button>
+        <button data-by="lines">Lines changed</button>
+      </div>
+      <button class="sc-clear" id="scClear" hidden></button>
+      <div class="sc-key">
+        <span><i style="background:var(--c-feat)"></i>Feature</span>
+        <span><i style="background:var(--c-fix)"></i>Fix</span>
+        <span><i style="background:var(--c-internal)"></i>Internal</span>
+      </div>
+    </div>
+    <div class="scmap" id="scmap"></div>
+    <p class="sc-note" id="scNote"></p>
+  </div></section>
+
   <div class="tabwrap shell" id="tablewrap"></div>
 </div>
 
@@ -375,6 +429,7 @@
 
   var state = {
     days: 30, author: "", ports: true, off: {}, stream: null,
+    scope: null, scopeBy: "prs",  // scope map: picked scope ("" = unscoped) and what sizes the tiles
     view: SUMMARY ? "streams" : "prs",  // "prs" draws one dot per PR, "streams" one bar per effort
     px: null                // px per day; null means "fit the window"
   };
@@ -464,6 +519,7 @@
     var rows = LANED.filter(function (q) {
       if (state.author && q.author !== state.author) return false;
       if (state.off[q.bucket]) return false;
+      if (state.scope != null && q.scope !== state.scope) return false;
       return true;
     });
 
@@ -589,6 +645,7 @@
     paintStreams(streams, rows);
     paintLegend();
     paintTable(inStream ? rows.filter(function (q) { return inStream[q.number]; }) : rows);
+    paintScopes();
 
     var bits = [];
     if (picked) bits.push('showing "' + picked.title + '" (' + picked.prs.length + " PRs) · click it again to clear");
@@ -728,6 +785,7 @@
     var inS = null;
     if (picked) { inS = {}; picked.prs.forEach(function (n) { inS[n] = 1; }); }
     paintTable(inS ? rows.filter(function (q) { return inS[q.number]; }) : rows);
+    paintScopes();
 
     var bits = ["one bar per work stream, ticks are the individual PRs",
                 "limited to the " + state.days + " day window the summary covers"];
@@ -892,6 +950,166 @@
           "<td>" + esc(q.author) + "</td><td>" + esc(q.title) + "</td></tr>";
       }).join("") + "</tbody></table></div>";
   }
+
+  // ---- scope map ---------------------------------------------------------
+
+  // Squarified treemap: lay values (sorted large to small) into a rect as
+  // rows that keep each tile as close to square as possible.
+  function squarify(vals, x, y, w, h) {
+    var total = vals.reduce(function (a, b) { return a + b; }, 0), out = [];
+    if (!total || w <= 0 || h <= 0) return vals.map(function () { return { x: x, y: y, w: 0, h: 0 }; });
+    var k = (w * h) / total;
+    var areas = vals.map(function (v) { return v * k; });
+    function worst(row, side) {
+      var sum = 0, mx = 0, mn = Infinity;
+      row.forEach(function (a) { sum += a; mx = Math.max(mx, a); mn = Math.min(mn, a); });
+      return Math.max(side * side * mx / (sum * sum), (sum * sum) / (side * side * mn));
+    }
+    var i = 0;
+    while (i < areas.length) {
+      var side = Math.min(w, h), row = [areas[i]], j = i + 1;
+      while (j < areas.length && worst(row.concat(areas[j]), side) <= worst(row, side)) { row.push(areas[j]); j++; }
+      var sum = row.reduce(function (a, b) { return a + b; }, 0), thick = sum / side;
+      if (w >= h) {
+        var yy = y;
+        row.forEach(function (a) { var hh = a / thick; out.push({ x: x, y: yy, w: thick, h: hh }); yy += hh; });
+        x += thick; w -= thick;
+      } else {
+        var xx = x;
+        row.forEach(function (a) { var ww = a / thick; out.push({ x: xx, y: y, w: ww, h: thick }); xx += ww; });
+        y += thick; h -= thick;
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  // "api-headless-cms" groups under "api", "app-admin" under "app".
+  function scopeFamily(sc) { return sc ? sc.split("-")[0] : "no scope"; }
+
+  var SCOPES = null;    // last painted scope tiles, for hover and click
+
+  function paintScopes() {
+    var el = document.getElementById("scmap");
+    var winStart = END_MS - (state.days - 1) * DAY;
+    var streams = (SUMMARY && SUMMARY[String(state.days)]) ? SUMMARY[String(state.days)].streams : null;
+    var picked = (streams && state.stream != null) ? streams[state.stream] : null;
+    var inS = null;
+    if (picked) { inS = {}; picked.prs.forEach(function (n) { inS[n] = 1; }); }
+
+    var rows = LANED.filter(function (q) {
+      if (dayMs(q.day) < winStart) return false;
+      if (state.author && q.author !== state.author) return false;
+      if (state.off[q.bucket]) return false;
+      if (inS && !inS[q.number]) return false;
+      return true;
+    });
+
+    var byScope = {};
+    rows.forEach(function (q) {
+      var t = byScope[q.scope] = byScope[q.scope] || { key: q.scope, prs: [], feat: 0, fix: 0, internal: 0, lines: 0 };
+      t.prs.push(q); t[q.bucket]++; t.lines += (q.add || 0) + (q.del || 0);
+    });
+    var size = function (t) { return state.scopeBy === "lines" ? Math.max(1, t.lines) : t.prs.length; };
+    var fams = {};
+    Object.keys(byScope).forEach(function (k) {
+      var f = scopeFamily(k);
+      (fams[f] = fams[f] || { name: f, tiles: [], v: 0 }).tiles.push(byScope[k]);
+    });
+    var famList = Object.keys(fams).map(function (f) {
+      var g = fams[f];
+      g.tiles.sort(function (a, b) { return size(b) - size(a); });
+      g.v = g.tiles.reduce(function (a, t) { return a + size(t); }, 0);
+      return g;
+    }).sort(function (a, b) { return b.v - a.v; });
+
+    document.getElementById("scWin").textContent = state.days + " days";
+    var clear = document.getElementById("scClear");
+    clear.hidden = state.scope == null;
+    if (state.scope != null) clear.textContent = "Showing " + (state.scope || "no scope") + " only \u00d7";
+
+    var W = el.clientWidth, H = el.clientHeight, GAP = 3, HEAD = 18;
+    var html = [];
+    SCOPES = {};
+    var famRects = squarify(famList.map(function (g) { return g.v; }), 0, 0, W, H);
+    famList.forEach(function (g, gi) {
+      var r = famRects[gi];
+      var multi = g.tiles.length > 1 || (g.tiles[0].key || "no scope") !== g.name;
+      var head = multi && r.h > 54 && r.w > 70 ? HEAD : 0;
+      if (head) {
+        html.push('<div class="sc-group" style="left:' + r.x + "px;top:" + r.y + "px;width:" + r.w + 'px;height:' + head + 'px"><b>' + esc(g.name) + "</b></div>");
+      }
+      var tr = squarify(g.tiles.map(size), r.x, r.y + head, r.w, r.h - head);
+      g.tiles.forEach(function (t, ti) {
+        var b = tr[ti];
+        var x = b.x + GAP / 2, y = b.y + GAP / 2, w = Math.max(0, b.w - GAP), h = Math.max(0, b.h - GAP);
+        if (w < 2 || h < 2) return;
+        var n = t.prs.length;
+        var lead = ["feat", "fix", "internal"].reduce(function (a, k) { return t[k] > t[a] ? k : a; }, "internal");
+        var cls = "sc" + (t.key === "" ? " none" : "") + (state.scope === t.key ? " on" : "");
+        var tone = t.key === "" ? "" : ' style="--tone:' + COLOR[lead] + ";";
+        var pos = "left:" + x.toFixed(1) + "px;top:" + y.toFixed(1) + "px;width:" + w.toFixed(1) + "px;height:" + h.toFixed(1) + 'px"';
+        html.push('<div class="' + cls + '" data-k="' + esc(t.key) + '"' + (tone ? tone + pos : ' style="' + pos) + ">");
+        if (w > 46 && h > 24) html.push('<span class="nm">' + esc(t.key || "no scope") + "</span>");
+        if (w > 46 && h > 40) {
+          html.push('<span class="ct">' + (state.scopeBy === "lines" ? fmtNum(t.lines) + (w > 90 ? " lines" : "") : n + " PR" + (n === 1 ? "" : "s")) + "</span>");
+        }
+        html.push('<span class="mix">' + ["feat", "fix", "internal"].map(function (k) {
+          return t[k] ? '<i style="flex:' + t[k] + ";background:" + COLOR[k] + '"></i>' : "";
+        }).join("") + "</span></div>");
+        SCOPES[t.key] = t;
+      });
+    });
+    el.className = "scmap" + (state.scope != null ? " picking" : "");
+    el.innerHTML = rows.length ? html.join("") : '<p class="sc-note">No PRs match the current filters.</p>';
+
+    var unscoped = byScope[""] ? byScope[""].prs.length : 0;
+    document.getElementById("scNote").textContent =
+      "Each tile is a conventional-commit scope, grouped by its prefix. Its tint is the most common PR type, and the strip along the bottom shows the mix." +
+      (unscoped ? " " + unscoped + " PR" + (unscoped === 1 ? " has" : "s have") + " no scope (hatched)." : "") +
+      (picked ? " Limited to the \u201c" + picked.title + "\u201d stream." : "") +
+      " Click a tile to filter the chart and table to it.";
+  }
+
+  function fmtNum(n) { return n >= 10000 ? Math.round(n / 1000) + "k" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n); }
+
+  function showScopeTip(t, ev) {
+    var top = t.prs.slice().sort(function (a, b) { return (b.add + b.del) - (a.add + a.del); }).slice(0, 3);
+    tip.innerHTML =
+      '<div class="h">' + esc(t.key || "no scope") + "</div>" +
+      "<div>" + t.prs.length + " PR" + (t.prs.length === 1 ? "" : "s") + ": " +
+      [["feat", "feature"], ["fix", "fix"], ["internal", "internal"]].filter(function (k) { return t[k[0]]; })
+        .map(function (k) { return t[k[0]] + " " + k[1]; }).join(", ") + "</div>" +
+      '<div class="m">' + fmtNum(t.lines) + " lines changed</div>" +
+      top.map(function (q) { return '<div class="m">#' + q.number + " " + esc(q.short) + "</div>"; }).join("");
+    tip.hidden = false;
+    var pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+    var left = ev.clientX + pad, topY = ev.clientY + pad;
+    if (left + w > innerWidth - 8) left = ev.clientX - w - pad;
+    if (topY + h > innerHeight - 8) topY = ev.clientY - h - pad;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, topY) + "px";
+  }
+
+  (function () {
+    var el = document.getElementById("scmap");
+    function tileOf(ev) { var d = ev.target.closest && ev.target.closest(".sc"); return d && SCOPES ? SCOPES[d.getAttribute("data-k")] : null; }
+    el.addEventListener("mousemove", function (ev) { var t = tileOf(ev); if (t) showScopeTip(t, ev); else tip.hidden = true; });
+    el.addEventListener("mouseleave", function () { tip.hidden = true; });
+    el.addEventListener("click", function (ev) {
+      var t = tileOf(ev); if (!t) return;
+      state.scope = state.scope === t.key ? null : t.key;
+      tip.hidden = true;
+      render(true);
+    });
+    document.getElementById("scClear").addEventListener("click", function () { state.scope = null; render(true); });
+    document.getElementById("scBy").addEventListener("click", function (ev) {
+      var b = ev.target.closest("button"); if (!b) return;
+      state.scopeBy = b.getAttribute("data-by");
+      [].forEach.call(this.children, function (c) { c.setAttribute("aria-pressed", c === b ? "true" : "false"); });
+      paintScopes();
+    });
+  })();
 
   function showTip(q, ev) {
     tip.innerHTML =
