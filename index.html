@@ -27,7 +27,7 @@
     --chip:      rgba(10,10,20,0.045);
     --chip-on:   #ffffff;
     --chip-on-shadow: 0 1px 2px rgba(20,20,40,0.08), 0 0 0 0.5px rgba(10,10,20,0.08);
-    --tip-bg:    rgba(255,255,255,0.78);
+    --tip-bg:    #ffffff;
 
     --c-feat:     #6a5cf6;
     --c-fix:      #e8890c;
@@ -58,7 +58,7 @@
       --hair: rgba(255,255,255,0.07); --hair-2: rgba(255,255,255,0.12);
       --chip: rgba(255,255,255,0.04); --chip-on: rgba(255,255,255,0.10);
       --chip-on-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 0.5px rgba(255,255,255,0.10);
-      --tip-bg: rgba(18,18,24,0.72);
+      --tip-bg: #141419;
       --c-feat: #8f84ff; --c-fix: #f5a524; --c-internal: #2cc9ad;
       --grid: rgba(255,255,255,0.04); --axis: rgba(255,255,255,0.10);
     }
@@ -75,7 +75,7 @@
     --hair: rgba(255,255,255,0.07); --hair-2: rgba(255,255,255,0.12);
     --chip: rgba(255,255,255,0.04); --chip-on: rgba(255,255,255,0.10);
     --chip-on-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 0.5px rgba(255,255,255,0.10);
-    --tip-bg: rgba(18,18,24,0.72);
+    --tip-bg: #141419;
     --c-feat: #8f84ff; --c-fix: #f5a524; --c-internal: #2cc9ad;
     --grid: rgba(255,255,255,0.04); --axis: rgba(255,255,255,0.10);
   }
@@ -265,7 +265,6 @@
   #tip {
     position: fixed; z-index: 10; pointer-events: none; max-width: 340px;
     background: var(--tip-bg); color: var(--text);
-    backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
     border-radius: 14px; box-shadow: 0 0 0 1px var(--hair-2), 0 18px 40px -12px rgba(0,0,0,0.35);
     padding: 10px 13px; font-size: 12.5px; line-height: 1.45;
   }
