@@ -12,7 +12,7 @@ days_ago() { date -u -v-"$1"d +%Y-%m-%d 2>/dev/null || date -u -d "$1 days ago" 
 # Cap each model call so a stalled request fails over to the retry instead of
 # hanging the job. macOS has no `timeout` unless coreutils is installed.
 TIMEOUT=""
-command -v timeout >/dev/null && TIMEOUT="timeout ${PR_GRAPH_TIMEOUT:-600}"
+command -v timeout >/dev/null && TIMEOUT="timeout ${PR_GRAPH_TIMEOUT:-1800}"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
