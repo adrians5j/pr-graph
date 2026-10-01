@@ -9,6 +9,11 @@ WINDOWS="${PR_GRAPH_WINDOWS:-14 30 90}"
 # BSD date locally, GNU date on CI runners.
 days_ago() { date -u -v-"$1"d +%Y-%m-%d 2>/dev/null || date -u -d "$1 days ago" +%Y-%m-%d; }
 
+# Cap each model call so a stalled request fails over to the retry instead of
+# hanging the job. macOS has no `timeout` unless coreutils is installed.
+TIMEOUT=""
+command -v timeout >/dev/null && TIMEOUT="timeout ${PR_GRAPH_TIMEOUT:-600}"
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -61,7 +66,7 @@ for D in $WINDOWS; do
   OK=0
   for ATTEMPT in 1 2; do
     { printf '%s\n' "$BRIEF"; cat "$TMP/prs.txt"; } \
-      | claude -p --model "$MODEL" > "$TMP/resp.txt" || true
+      | $TIMEOUT claude -p --model "$MODEL" > "$TMP/resp.txt" || true
 
     # The model is asked for bare JSON but sometimes wraps or prefaces it.
     python3 -c 'import sys; t=sys.stdin.read(); i=t.find("{"); j=t.rfind("}"); sys.stdout.write(t[i:j+1] if i>=0 and j>i else "")' \
