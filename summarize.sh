@@ -5,7 +5,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 MODEL="${PR_GRAPH_MODEL:-claude-sonnet-5}"
-WINDOWS="${PR_GRAPH_WINDOWS:-14 30 90}"
+WINDOWS="${PR_GRAPH_WINDOWS:-7 14 30 90}"
 # BSD date locally, GNU date on CI runners.
 days_ago() { date -u -v-"$1"d +%Y-%m-%d 2>/dev/null || date -u -d "$1 days ago" +%Y-%m-%d; }
 

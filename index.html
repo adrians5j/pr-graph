@@ -341,6 +341,7 @@
     </div>
     <span class="ctl-label">Window</span>
     <div class="seg" id="range">
+      <button data-days="7">7d</button>
       <button data-days="14">14d</button>
       <button data-days="30" aria-pressed="true">30d</button>
       <button data-days="90">90d</button>
@@ -1235,6 +1236,7 @@
     state.stream = null;
     state.px = null;
     [].forEach.call(this.children, function (c) { c.setAttribute("aria-pressed", c === b ? "true" : "false"); });
+    paintAuthors();
     render();
   });
 
@@ -1245,14 +1247,22 @@
     else zoomAt(z === "in" ? 1.6 : 1 / 1.6, null);
   });
 
-  var authors = {};
-  LANED.forEach(function (q) { authors[q.author] = (authors[q.author] || 0) + 1; });
+  // Author counts follow the window. The picked author stays listed even
+  // when they merged nothing in it, so the selection never silently changes.
   var sel = document.getElementById("author");
-  Object.keys(authors).sort(function (a, b) { return authors[b] - authors[a]; }).forEach(function (a) {
-    var o = document.createElement("option");
-    o.value = a; o.textContent = a + " (" + authors[a] + ")";
-    sel.appendChild(o);
-  });
+  function paintAuthors() {
+    var winStart = END_MS - (state.days - 1) * DAY, authors = {};
+    LANED.forEach(function (q) { if (dayMs(q.day) >= winStart) authors[q.author] = (authors[q.author] || 0) + 1; });
+    if (state.author && !authors[state.author]) authors[state.author] = 0;
+    sel.innerHTML = '<option value="">everyone</option>';
+    Object.keys(authors).sort(function (a, b) { return authors[b] - authors[a] || a.localeCompare(b); }).forEach(function (a) {
+      var o = document.createElement("option");
+      o.value = a; o.textContent = a + " (" + authors[a] + ")";
+      sel.appendChild(o);
+    });
+    sel.value = state.author;
+  }
+  paintAuthors();
   sel.addEventListener("change", function () { state.author = this.value; render(true); });
 
   document.getElementById("ports").addEventListener("click", function () {
